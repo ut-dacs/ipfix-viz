@@ -1,0 +1,8 @@
+<h1>Dashboard</h1>
+
+{% for graph_file in graph_files %}
+    <img src="{{ graph_file }}" />
+    {% if loop.index is divisibleby 3 %} 
+        <br />
+    {% endif %}
+{% endfor %}
