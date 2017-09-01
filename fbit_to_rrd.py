@@ -7,47 +7,49 @@ import shlex
 
 import asyncio
 import rrdtool
-import os.path
+import os
 
-queries = [
-{"name": "all",  "query" : "/usr/local/bin/fbitdump -C /home/hendriksl/fbitdump.xml -R {} -A  -N 10 -q -o'fmt:%pkt:%byt:%fl'", "rrd_format" : "TODO"} ,
-{"name": "tcp",  "query" : "/usr/local/bin/fbitdump -C /home/hendriksl/fbitdump.xml -R {} -A  -N 10 -q -o'fmt:%pkt:%byt:%fl' '%proto TCP'", "rrd_format" : "TODO"} ,
-{"name": "udp",  "query" : "/usr/local/bin/fbitdump -C /home/hendriksl/fbitdump.xml -R {} -A  -N 10 -q -o'fmt:%pkt:%byt:%fl' '%proto UDP'", "rrd_format" : "TODO"} ,
-{"name": "icmp6",  "query" : "/usr/local/bin/fbitdump -C /home/hendriksl/fbitdump.xml -R {} -A  -N 10 -q -o'fmt:%pkt:%byt:%fl' '%proto IPv6-ICMP'", "rrd_format" : "TODO"} ,
-{"name": "frag6",  "query" : "/usr/local/bin/fbitdump -C /home/hendriksl/fbitdump.xml -R {} -A  -N 10 -q -o'fmt:%pkt:%byt:%fl' '%proto IPv6-FRAG'", "rrd_format" : "TODO"},
-{"name": "ehCnt1",  "query" : "/usr/local/bin/fbitdump -C /home/hendriksl/fbitdump.xml -R {} -A  -N 10 -q -o'fmt:%pkt:%byt:%fl' '%v6ehCnt 1'", "rrd_format" : "TODO"} ,
-{"name": "ehCnt2",  "query" : "/usr/local/bin/fbitdump -C /home/hendriksl/fbitdump.xml -R {} -A  -N 10 -q -o'fmt:%pkt:%byt:%fl' '%v6ehCnt 2'", "rrd_format" : "TODO"} ,
-{"name": "ehCntgt2",  "query" : "/usr/local/bin/fbitdump -C /home/hendriksl/fbitdump.xml -R {} -A  -N 10 -q -o'fmt:%pkt:%byt:%fl' '%v6ehCnt > 2'", "rrd_format" : "TODO"} ,
-{"name": "upperTcp",  "query" : "/usr/local/bin/fbitdump -C /home/hendriksl/fbitdump.xml -R {} -A  -N 10 -q -o'fmt:%pkt:%byt:%fl' '%v6ehCnt > 0 and %v6ehUpperProto TCP'", "rrd_format" : "TODO"},
-{"name": "upperUdp",  "query" : "/usr/local/bin/fbitdump -C /home/hendriksl/fbitdump.xml -R {} -A  -N 10 -q -o'fmt:%pkt:%byt:%fl' '%v6ehCnt > 0 and %v6ehUpperProto UDP'", "rrd_format" : "TODO"},
-{"name": "upperIcmp6",  "query" : "/usr/local/bin/fbitdump -C /home/hendriksl/fbitdump.xml -R {} -A  -N 10 -q -o'fmt:%pkt:%byt:%fl' '%v6ehCnt > 0 and %v6ehUpperProto IPv6-ICMP'", "rrd_format" : "TODO"},
-{"name": "upperIpsecEsp",  "query" : "/usr/local/bin/fbitdump -C /home/hendriksl/fbitdump.xml -R {} -A  -N 10 -q -o'fmt:%pkt:%byt:%fl' '%v6ehCnt > 0 and %v6ehUpperProto IPSEC-ESP'", "rrd_format" : "TODO"},
-]
+import configparser
+config = configparser.ConfigParser()
+
+
+base_dir =  os.path.dirname(os.path.realpath(__file__))
+config.read(os.path.join(base_dir, 'config.conf'))
+
 
 @asyncio.coroutine
-def process_query(fbit_dir, fbit_query):
+def process_query(fbit_dir, fbit_query_name):
     dir_date = fbit_dir[-14:]
     unix_ts = dt.datetime.strptime(dir_date, "%Y%m%d%H%M%S").strftime("%s")
-    sub = asyncio.create_subprocess_exec(*shlex.split(fbit_query.get('query').format(fbit_dir)), stdout=asyncio.subprocess.PIPE);
+
+    query_cmd = "{} -C {} -R {} -A -N10 -q -o'{}' '{}'".format(
+        config['DEFAULT']['fbitdump_bin'],
+        config['DEFAULT']['fbitdump_config'],
+        fbit_dir,
+        config[fbit_query_name]['query_output'],
+        config[fbit_query_name]['query_filter']
+        )
+
+    sub = asyncio.create_subprocess_exec(*shlex.split(query_cmd), stdout=asyncio.subprocess.PIPE);
     proc = yield from sub
     data = yield from proc.stdout.readline()
     line = data.decode('ascii').rstrip()
     #print(fbit_query.get('name'), line)
     if line:
         pkt, byt, fl = [x.strip() for x in line.split(':')]
-        rrdtool.update("{}.rrd".format(fbit_query.get('name')), "{}:{}:{}:{}".format(unix_ts, fl, pkt, byt))
+        rrdtool.update("{}.rrd".format(fbit_query_name), "{}:{}:{}:{}".format(unix_ts, fl, pkt, byt))
     yield from proc.wait()
  
 
 @asyncio.coroutine
 def main(loop, fbit_dir):
-    coroutines = [process_query(fbit_dir, fbit_query) for fbit_query in queries]
+    coroutines = [process_query(fbit_dir, fbit_query_name) for fbit_query_name in config.sections()]
     for coroutine in asyncio.as_completed(coroutines):
         yield from coroutine
  
 def create_rrds():
-    for q in queries:
-        rrdfile = "{}.rrd".format(q['name'])
+    for q in config.sections():
+        rrdfile = "{}.rrd".format(q)
         if not os.path.isfile(rrdfile):
             print("Missing {}, creating it".format(rrdfile))
             rrdtool.create(rrdfile,
