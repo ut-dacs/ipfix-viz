@@ -9,6 +9,9 @@ import asyncio
 import rrdtool
 import os
 
+import requests
+import json
+
 import configparser
 config = configparser.ConfigParser()
 
@@ -38,6 +41,15 @@ def process_query(fbit_dir, fbit_query_name):
     if line:
         pkt, byt, fl = [x.strip() for x in line.split(':')]
         rrdtool.update("{}.rrd".format(fbit_query_name), "{}:{}:{}:{}".format(unix_ts, fl, pkt, byt))
+        # opentsdb stuff
+        tsdb_url = "http://localhost:4242/api/put/"  
+        tsdb_data_fl= {"metric": "ipfix.ipv6."+fbit_query_name+".flows", "timestamp": unix_ts, "value": fl, "tags":{"exporter":"invea-10g"}}
+        requests.post(tsdb_url, data=json.dumps(tsdb_data_fl))
+
+        tsdb_data_pkt= {"metric": "ipfix.ipv6."+fbit_query_name+".packets", "timestamp": unix_ts, "value": pkt, "tags":{"exporter":"invea-10g"}}
+        requests.post(tsdb_url, data=json.dumps(tsdb_data_pkt))
+        tsdb_data_byt= {"metric": "ipfix.ipv6."+fbit_query_name+".bytes", "timestamp": unix_ts, "value": byt, "tags":{"exporter":"invea-10g"}}
+        requests.post(tsdb_url, data=json.dumps(tsdb_data_byt))
     yield from proc.wait()
  
 
@@ -63,7 +75,7 @@ def create_rrds():
 def find_last_fbit_dir():
     five_min_ago = dt.datetime.now() - dt.timedelta(minutes=5)
     previous_timestamp = five_min_ago.replace(minute=5*(five_min_ago.minute // 5))
-    return previous_timestamp.strftime("/mnt/data/fbit_ipfix/4/%Y/%m/%d/ic%Y%m%d%H%M00")
+    return previous_timestamp.strftime(config['DEFAULT']['fbitdump_data'])
 
  
 if __name__ == '__main__':
